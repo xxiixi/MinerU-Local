@@ -4,18 +4,41 @@ import uvicorn
 import click
 from pathlib import Path
 from glob import glob
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 from loguru import logger
 from base64 import b64encode
 
+# 我的苹果芯片不支持MPS，所以强制使用CPU
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
+# 在导入其他模块之前设置
+import torch
+torch.backends.mps.is_available = lambda: False
+
 from mineru.cli.common import aio_do_parse, read_fn, pdf_suffixes, image_suffixes
 from mineru.utils.cli_parser import arg_parse
 from mineru.version import __version__
 
-app = FastAPI()
+app = FastAPI(
+    title="MinerU API",
+    description="MinerU Document Understanding API",
+    version=__version__
+)
+
+# 添加CORS中间件以支持前端直接调用
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 在生产环境中应该指定具体的域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 def encode_image(image_path: str) -> str:

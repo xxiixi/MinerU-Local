@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 import litserve as ls
 from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from mineru.cli.common import do_parse, read_fn
@@ -19,17 +20,13 @@ class MinerUAPI(ls.LitAPI):
     def setup(self, device):
         """Setup environment variables exactly like MinerU CLI does"""
         logger.info(f"Setting up on device: {device}")
-                
-        if os.getenv('MINERU_DEVICE_MODE', None) == None:
-            os.environ['MINERU_DEVICE_MODE'] = device if device != 'auto' else get_device()
-
-        device_mode = os.environ['MINERU_DEVICE_MODE']
+        
+        # 强制使用 CPU 模式
+        os.environ['MINERU_DEVICE_MODE'] = 'cpu'
+        device_mode = 'cpu'
+        
         if os.getenv('MINERU_VIRTUAL_VRAM_SIZE', None) == None:
-            if device_mode.startswith("cuda") or device_mode.startswith("npu"):
-                vram = round(get_vram(device_mode))
-                os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = str(vram)
-            else:
-                os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = '1'
+            os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = '1'
         logger.info(f"MINERU_VIRTUAL_VRAM_SIZE: {os.environ['MINERU_VIRTUAL_VRAM_SIZE']}")
 
         if os.getenv('MINERU_MODEL_SOURCE', None) in ['huggingface', None]:
@@ -69,6 +66,11 @@ class MinerUAPI(ls.LitAPI):
             file_name = Path(input_path).stem
             pdf_bytes = read_fn(Path(input_path))
             
+            # 调试：检查 do_parse 函数的参数
+            import inspect
+            logger.info(f"do_parse signature: {inspect.signature(do_parse)}")
+            logger.info(f"Calling do_parse with formula_enable={inputs['formula_enable']}, table_enable={inputs['table_enable']}")
+            
             do_parse(
                 output_dir=str(output_dir),
                 pdf_file_names=[file_name],
@@ -99,10 +101,21 @@ class MinerUAPI(ls.LitAPI):
 if __name__ == '__main__':
     server = ls.LitServer(
         MinerUAPI(output_dir='/tmp/mineru_output'),
-        accelerator='auto',
+        accelerator='cpu',  # 强制使用 CPU
         devices='auto',
         workers_per_device=1,
         timeout=False
     )
+    
+    # 添加 CORS 中间件
+    app = server.app
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # 允许的前端域名
+        allow_credentials=True,
+        allow_methods=["*"],  # 允许所有 HTTP 方法
+        allow_headers=["*"],  # 允许所有请求头
+    )
+    
     logger.info("Starting MinerU server on port 8000")
     server.run(port=8000, generate_client_file=False) 
